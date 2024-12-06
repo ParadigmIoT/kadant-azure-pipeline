@@ -1,0 +1,3 @@
+[submodule "kadant-azure-functions"]
+	path = kadant-azure-functions
+	url = https://github.com/ParadigmIoT/kadant-azure-functions.git

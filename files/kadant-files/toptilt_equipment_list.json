@@ -1,0 +1,54 @@
+{
+    "equipment": [
+        {
+            "mac": "f6-7d-5d-d9-1e-1c",
+            "company": "GP",
+            "location": "Toledo",
+            "area": "PM3",
+            "equipment": "TopTilt",
+            "section": "Calender",
+            "roll_number": "Reel",
+            "roll_side": "DriveSide"
+        },
+        {
+            "mac": "e0-6a-63-c8-69-72",
+            "company": "GP",
+            "location": "Toledo",
+            "area": "PM3",
+            "equipment": "TopTilt",
+            "section": "Calender",
+            "roll_number": "Reel",
+            "roll_side": "TendingSide"
+        },
+        {
+            "mac": "f6-7d-5d-d9-1e-1b",
+            "company": "GP",
+            "location": "Toledo",
+            "area": "PM3",
+            "equipment": "TopTilt",
+            "section": "Calender",
+            "roll_number": "King",
+            "roll_side": "DriveSide"
+        },
+        {
+            "mac": "e0-6a-63-c8-69-73",
+            "company": "GP",
+            "location": "Toledo",
+            "area": "PM3",
+            "equipment": "TopTilt",
+            "section": "Calender",
+            "roll_number": "King",
+            "roll_side": "TendingSide"
+        },
+        {
+            "mac": "f1-37-c7-ec-7e",
+            "company": "TeracodeTest",
+            "location": "Nevada",
+            "area": "Vegas",
+            "equipment": "Test",
+            "section": "Calender",
+            "roll_number": "King",
+            "roll_side": "TendingSide"
+        }
+    ]
+}

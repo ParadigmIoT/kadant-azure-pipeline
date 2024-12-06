@@ -1,0 +1,372 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "_generator": {
+            "name": "bicep",
+            "version": "0.27.1.19265",
+            "templateHash": "10236278406252242019"
+        }
+    },
+    "parameters": {
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]"
+        },
+        "eventHubNameSpaceSKU": {
+            "type": "string",
+            "defaultValue": "Standard"
+        },
+        "iotHubSKU": {
+            "type": "string",
+            "defaultValue": "S1"
+        },
+        "iotHubCapacity": {
+            "type": "int",
+            "defaultValue": 1
+        },
+        "enableFallbackRoute": {
+            "type": "bool",
+            "defaultValue": true,
+            "metadata": {
+                "description": "If enabled, the default IoT Hub fallback route will be added"
+            }
+        }
+    },
+    "variables": {
+        "nameSuffix": "kadant-sensors",
+        "appInsightsName": "[format('ai-{0}', variables('nameSuffix'))]",
+        "functionAppServiceName": "[format('ASP-{0}', variables('nameSuffix'))]",
+        "functionAppName": "[format('fn-{0}', variables('nameSuffix'))]",
+        "storageAccountName": "[format('fn{0}sa', replace(variables('nameSuffix'), '-', ''))]",
+        "storageBlobContainerName": "[format('app-package-fn-{0}', variables('nameSuffix'))]",
+        "eventHubNamespaceName": "[format('evhubns-{0}', variables('nameSuffix'))]",
+        "iotHubName": "[format('iothub-{0}', variables('nameSuffix'))]",
+        "eventHubName": "Events",
+        "eventHubFullName": "[format('{0}/{1}', variables('eventHubNamespaceName'), variables('eventHubName'))]",
+        "eventHubEndpointName": "StackEvents"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.EventHub/namespaces",
+            "apiVersion": "2023-01-01-preview",
+            "name": "[variables('eventHubNamespaceName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "[parameters('eventHubNameSpaceSKU')]"
+            },
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.EventHub/namespaces/eventhubs",
+            "apiVersion": "2023-01-01-preview",
+            "name": "[variables('eventHubFullName')]",
+            "properties": {},
+            "dependsOn": [
+                "[resourceId('Microsoft.EventHub/namespaces', variables('eventHubNamespaceName'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.EventHub/namespaces/eventhubs/authorizationRules",
+            "apiVersion": "2023-01-01-preview",
+            "name": "[format('{0}/{1}/{2}', split(variables('eventHubFullName'), '/')[0], split(variables('eventHubFullName'), '/')[1], 'Send')]",
+            "properties": {
+                "rights": [
+                    "Send"
+                ]
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.EventHub/namespaces/eventhubs', split(variables('eventHubFullName'), '/')[0], split(variables('eventHubFullName'), '/')[1])]"
+            ]
+        },
+        {
+            "type": "Microsoft.EventHub/namespaces/eventhubs/authorizationRules",
+            "apiVersion": "2023-01-01-preview",
+            "name": "[format('{0}/{1}/{2}', split(variables('eventHubFullName'), '/')[0], split(variables('eventHubFullName'), '/')[1], 'Listen')]",
+            "properties": {
+                "rights": [
+                    "Listen"
+                ]
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.EventHub/namespaces/eventhubs', split(variables('eventHubFullName'), '/')[0], split(variables('eventHubFullName'), '/')[1])]"
+            ]
+        },
+        {
+            "type": "Microsoft.Devices/IotHubs",
+            "apiVersion": "2023-06-30",
+            "name": "[variables('iotHubName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "[parameters('iotHubSKU')]",
+                "capacity": "[parameters('iotHubCapacity')]"
+            },
+            "properties": {
+                "routing": {
+                    "endpoints": {
+                        "eventHubs": [
+                            {
+                                "name": "[variables('eventHubEndpointName')]",
+                                "connectionString": "[listKeys(resourceId('Microsoft.EventHub/namespaces/eventhubs/authorizationRules', split(variables('eventHubFullName'), '/')[0], split(variables('eventHubFullName'), '/')[1], 'Send'), '2023-01-01-preview').primaryConnectionString]"
+                            }
+                        ]
+                    },
+                    "routes": [
+                        {
+                            "name": "TTSTwinChangeEvents",
+                            "isEnabled": true,
+                            "source": "TwinChangeEvents",
+                            "condition": "IS_OBJECT($body.properties.desired) OR IS_OBJECT($body.tags)",
+                            "endpointNames": [
+                                "[variables('eventHubEndpointName')]"
+                            ]
+                        },
+                        {
+                            "name": "TTSDeviceLifecycleEvents",
+                            "isEnabled": true,
+                            "source": "DeviceLifecycleEvents",
+                            "endpointNames": [
+                                "[variables('eventHubEndpointName')]"
+                            ]
+                        }
+                    ],
+                    "fallbackRoute": "[if(parameters('enableFallbackRoute'), createObject('name', 'FallbackRoute', 'isEnabled', true(), 'source', 'DeviceMessages', 'endpointNames', createArray('events')), null())]"
+                }
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.EventHub/namespaces/eventhubs/authorizationRules', split(variables('eventHubFullName'), '/')[0], split(variables('eventHubFullName'), '/')[1], 'Send')]"
+            ]
+        },
+        {
+            "type": "Microsoft.Insights/components",
+            "apiVersion": "2020-02-02",
+            "name": "[variables('appInsightsName')]",
+            "location": "[parameters('location')]",
+            "kind": "web",
+            "properties": {
+                "Application_Type": "web",
+                "publicNetworkAccessForIngestion": "Enabled",
+                "publicNetworkAccessForQuery": "Enabled"
+            }
+        },
+        {
+            "type": "Microsoft.Web/sites",
+            "apiVersion": "2022-03-01",
+            "name": "[variables('functionAppName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', variables('functionAppServiceName'))]",
+                "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            ],
+            "tags": {
+                "hidden-link: /app-insights-resource-id": "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]"
+            },
+            "kind": "functionapp,linux",
+            "properties": {
+                "name": "[variables('functionAppName')]",
+                "siteConfig": {
+                    "appSettings": [
+                        {
+                            "name": "DEPLOYMENT_STORAGE_CONNECTION_STRING",
+                            "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('storageAccountName'),';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2019-06-01').keys[0].value,';EndpointSuffix=','core.windows.net')]"
+                        },
+                        {
+                            "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                            "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2015-05-01').ConnectionString]"
+                        },
+                        {
+                            "name": "AzureWebJobsStorage",
+                            "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('storageAccountName'),';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2019-06-01').keys[0].value,';EndpointSuffix=','core.windows.net')]"
+                        },
+                        {
+                            "name": "MQTT_ENDPOINT",
+                            "value": "dev.mykadant.com"
+                        },
+                        {
+                            "name": "MQTT_CLIENT_ID",
+                            "value": "ixSimpleMQTTTest"
+                        },
+                        {
+                            "name": "MQTT_USERNAME",
+                            "value": "CIT_RD_RPIGenericMQTT_001"
+                        },
+                        {
+                            "name": "MQTT_PASSWORD",
+                            "value": "X::d&8CcxP//ND"
+                        }
+                    ],
+                    "cors": {
+                        "allowedOrigins": [
+                            "https://portal.azure.com"
+                        ]
+                    },
+                    "azureStorageAccounts": {
+                        "certs": {
+                            "type": "AzureBlob",
+                            "accessKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2019-06-01').keys[0].value]",
+                            "accountName": "[variables('storageAccountName')]",
+                            "shareName": "certs",
+                            "mountPath": "/certs",
+                            "protocol": "Http"
+                        },
+                        "kadant-files": {
+                            "type": "AzureBlob",
+                            "accessKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2019-06-01').keys[0].value]",
+                            "accountName": "[variables('storageAccountName')]",
+                            "shareName": "kadant-files",
+                            "mountPath": "/kadant-files",
+                            "protocol": "Http"
+                        }
+                    }
+                },
+                "clientAffinityEnabled": false,
+                "virtualNetworkSubnetId": null,
+                "functionAppConfig": {
+                    "deployment": {
+                        "storage": {
+                            "type": "blobContainer",
+                            "value": "[concat('https://', variables('storageAccountName'), '.blob.', 'core.windows.net', '/', variables('storageBlobContainerName'))]",
+                            "authentication": {
+                                "type": "StorageAccountConnectionString",
+                                "storageAccountConnectionStringName": "DEPLOYMENT_STORAGE_CONNECTION_STRING"
+                            }
+                        }
+                    },
+                    "scaleAndConcurrency": {
+                        "maximumInstanceCount": 100,
+                        "instanceMemoryMB": 2048
+                    },
+                    "runtime": {
+                        "name": "python",
+                        "version": "3.11"
+                    }
+                },
+                "publicNetworkAccess": "Enabled",
+                "httpsOnly": true,
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('functionAppServiceName'))]"
+            },
+            "resources": [
+                {
+                    "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+                    "apiVersion": "2022-09-01",
+                    "name": "[concat(variables('functionAppName'), '/scm')]",
+                    "dependsOn": [
+                        "[resourceId('Microsoft.Web/Sites', variables('functionAppName'))]"
+                    ],
+                    "properties": {
+                        "allow": false
+                    }
+                },
+                {
+                    "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+                    "apiVersion": "2022-09-01",
+                    "name": "[concat(variables('functionAppName'), '/ftp')]",
+                    "dependsOn": [
+                        "[resourceId('Microsoft.Web/Sites', variables('functionAppName'))]"
+                    ],
+                    "properties": {
+                        "allow": false
+                    }
+                }
+            ]
+        },
+        {
+            "type": "Microsoft.Web/serverfarms",
+            "apiVersion": "2018-11-01",
+            "name": "[variables('functionAppServiceName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [],
+            "sku": {
+                "Tier": "FlexConsumption",
+                "Name": "FC1"
+            },
+            "kind": "linux",
+            "properties": {
+                "name": "[variables('functionAppServiceName')]",
+                "workerSize": "0",
+                "workerSizeId": "0",
+                "numberOfWorkers": "1",
+                "reserved": true,
+                "zoneRedundant": false
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2022-05-01",
+            "name": "[variables('storageAccountName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [],
+            "sku": {
+                "name": "Standard_LRS"
+            },
+            "properties": {
+                "supportsHttpsTrafficOnly": true,
+                "minimumTlsVersion": "TLS1_2",
+                "defaultToOAuthAuthentication": true,
+                "allowBlobPublicAccess": false
+            }
+        },
+        {
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "2021-04-01",
+            "name": "StorageBlobContainerTemplate",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            ],
+            "properties": {
+                "mode": "Incremental",
+                "template": {
+                    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                    "contentVersion": "1.0.0.1",
+                    "parameters": {},
+                    "variables": {},
+                    "resources": [
+                        {
+                            "name": "[concat(variables('storageAccountName'), '/default')]",
+                            "type": "Microsoft.Storage/storageAccounts/blobServices",
+                            "apiVersion": "2022-05-01",
+                            "dependsOn": []
+                        },
+                        {
+                            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+                            "apiVersion": "2022-05-01",
+                            "name": "[concat(variables('storageAccountName'), '/default/', variables('storageBlobContainerName'))]",
+                            "dependsOn": [
+                                "[resourceId(variables('nameSuffix'),'Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]"
+                            ]
+                        },
+                        {
+                            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+                            "apiVersion": "2022-05-01",
+                            "name": "[concat(variables('storageAccountName'), '/default/kadant-files')]",
+                            "dependsOn": [
+                                "[resourceId(variables('nameSuffix'),'Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]"
+                            ]
+                        },
+                        {
+                            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+                            "apiVersion": "2022-05-01",
+                            "name": "[concat(variables('storageAccountName'), '/default/certs')]",
+                            "dependsOn": [
+                                "[resourceId(variables('nameSuffix'),'Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]"
+                            ]
+                        }
+                    ]
+                }
+            },
+            "subscriptionId": "[subscription().subscriptionId]",
+            "resourceGroup": "[variables('nameSuffix')]"
+        }
+    ],
+    "outputs": {
+        "iotHubHostname": {
+            "type": "string",
+            "value": "[reference(resourceId('Microsoft.Devices/IotHubs', variables('iotHubName')), '2023-06-30').hostName]"
+        },
+        "iotHubOwnerKey": {
+            "type": "string",
+            "value": "[listKeys(resourceId('Microsoft.Devices/IotHubs', variables('iotHubName')), '2023-06-30').value[0].primaryKey]"
+        }
+    }
+}
